@@ -3,3 +3,5 @@ venv/
 
 # 忽略Python字节码缓存
 __pycache__/
+
+Desktop/
