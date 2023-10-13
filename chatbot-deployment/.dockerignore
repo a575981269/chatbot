@@ -1,0 +1,12 @@
+
+# 排除虚拟环境目录
+venv/
+
+# 排除 Python 编译缓存目录
+__pycache__/
+
+# 排除 VS Code 配置目录
+.vscode/
+*.pyc
+*.pyo
+*.env

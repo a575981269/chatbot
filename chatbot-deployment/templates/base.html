@@ -28,15 +28,17 @@
             </div>
         </div>
         <div class="chatbox__button">
-            <button><img src="{{ url_for('static', filename='images/chatbox-icon.svg') }}" /></button>
+            <button ><img src="{{ url_for('static', filename='images/chatbox-icon.svg') }}" /></button>
         </div>
     </div>
 </div>
 
+<script type="text/javascript" src="{{ url_for('static', filename='app.js') }}"></script>
     <script>
         $SCRIPT_ROOT = {{ request.script_root|tojson }};
+       var chatbox =  new Chatbox();
+       chatbox.display();
     </script>
-    <script type="text/javascript" src="{{ url_for('static', filename='app.js') }}"></script>
 
 </body>
 </html>
