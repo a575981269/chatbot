@@ -1,61 +1,70 @@
-import random
 import json
+import pandas as pd
+import random
+from transformers import BertForSequenceClassification, BertTokenizerFast
+from transformers import pipeline
 
-import torch
+def load_json_file(filename):
+    with open(filename) as f:
+        file = json.load(f)
+    return file
 
-from model import NeuralNet
-from nltk_utils import bag_of_words, tokenize
+filename = './intents.json'
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+intents = load_json_file(filename)
 
-with open('intents.json', 'r') as json_data:
-    intents = json.load(json_data)
+def create_df():
+    df = pd.DataFrame({
+        'Pattern' : [],
+        'Tag' : []
+    })
 
-FILE = "data.pth"
-data = torch.load(FILE)
+    return df
 
-input_size = data["input_size"]
-hidden_size = data["hidden_size"]
-output_size = data["output_size"]
-all_words = data['all_words']
-tags = data['tags']
-model_state = data["model_state"]
+df = create_df()
 
-model = NeuralNet(input_size, hidden_size, output_size).to(device)
-model.load_state_dict(model_state)
-model.eval()
+def extract_json_info(json_file, df):
 
-bot_name = "Sam"
+    for intent in json_file['intents']:
 
-def get_response(msg):
-    sentence = tokenize(msg)
-    X = bag_of_words(sentence, all_words)
-    X = X.reshape(1, X.shape[0])
-    X = torch.from_numpy(X).to(device)
+        for pattern in intent['patterns']:
 
-    output = model(X)
-    _, predicted = torch.max(output, dim=1)
+            sentence_tag = [pattern, intent['tag']]
+            df.loc[len(df.index)] = sentence_tag
 
-    tag = tags[predicted.item()]
+    return df
 
-    probs = torch.softmax(output, dim=1)
-    prob = probs[0][predicted.item()]
-    if prob.item() > 0.75:
-        for intent in intents['intents']:
-            if tag == intent["tag"]:
-                return random.choice(intent['responses'])
-    
-    return "I do not understand..."
+df = extract_json_info(intents, df)
 
+labels = df['Tag'].unique().tolist()
+labels = [s.strip() for s in labels]
+
+label2id = {label:id for id, label in enumerate(labels)}
+
+model_path = "./model"
+model = BertForSequenceClassification.from_pretrained(model_path)
+tokenizer= BertTokenizerFast.from_pretrained(model_path)
+chatbot= pipeline("sentiment-analysis", model=model, tokenizer=tokenizer)
+bot_name = "AnnaBella"
+
+
+def get_response(text):
+    score = chatbot(text)[0]['score']
+
+    if score < 0.8:
+        return "Sorry, I can't answer that."
+
+    label = label2id[chatbot(text)[0]['label']]
+    response = random.choice(intents['intents'][label]['responses'])
+
+    return response
 
 if __name__ == "__main__":
-    print("Let's chat! (type 'quit' to exit)")
+    print("Chatbot: Hi! I am your virtual assistance. Feel free to ask, and I'll do my best to provide you with answers and assistance.")
+    print("Type 'quit' to exit the chat\n\n")
+
     while True:
-        # sentence = "do you use credit cards?"
-        sentence = input("You: ")
-        if sentence == "quit":
+        text = input("You: ").strip().lower()
+        if text == 'quit':
             break
-
-        resp = get_response(sentence)
-        print(resp)
-
+        print(f"Chatbot: {get_response(text)}\n\n")

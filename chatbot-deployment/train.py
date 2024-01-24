@@ -1,129 +1,218 @@
-import numpy as np
-import random
+import warnings
+warnings.filterwarnings('ignore')
 import json
+import numpy as np
+import pandas as pd
+import random
+from matplotlib import pyplot as plt
+import seaborn as sns
+from wordcloud import WordCloud,STOPWORDS
+import missingno as msno
+
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+
+from keras.preprocessing import text
+import keras
+from keras.models import Sequential
+from keras.layers import Dense,Embedding,LSTM,Dropout
+from keras.callbacks import ReduceLROnPlateau
+
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+import nltk
+from nltk import word_tokenize
+from nltk.stem import PorterStemmer
 
 import torch
-import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 
-from nltk_utils import bag_of_words, tokenize, stem
-from model import NeuralNet
+from transformers import AutoTokenizer, TFAutoModelForSequenceClassification
+from transformers import pipeline
+from transformers import DistilBertTokenizerFast
+from transformers import BertForSequenceClassification, BertTokenizerFast
+from transformers import TFDistilBertForSequenceClassification, TFTrainer, TFTrainingArguments
+from transformers import BertTokenizer, TFBertForSequenceClassification, BertConfig
+from transformers import TrainingArguments, Trainer
 
-with open('intents.json', 'r') as f:
-    intents = json.load(f)
+#Load the data
+def load_json_file(filename):
+    with open(filename) as f:
+        file = json.load(f)
+    return file
 
-all_words = []
-tags = []
-xy = []
-# loop through each sentence in our intents patterns
-for intent in intents['intents']:
-    tag = intent['tag']
-    # add to tag list
-    tags.append(tag)
-    for pattern in intent['patterns']:
-        # tokenize each word in the sentence
-        w = tokenize(pattern)
-        # add to our words list
-        all_words.extend(w)
-        # add to xy pair
-        xy.append((w, tag))
+filename = './intents.json'
 
-# stem and lower each word
-ignore_words = ['?', '.', '!']
-all_words = [stem(w) for w in all_words if w not in ignore_words]
-# remove duplicates and sort
-all_words = sorted(set(all_words))
-tags = sorted(set(tags))
+intents = load_json_file(filename)
 
-print(len(xy), "patterns")
-print(len(tags), "tags:", tags)
-print(len(all_words), "unique stemmed words:", all_words)
+#Extract Info from the Json data file and Store it in dataframe
+def create_df():
+    df = pd.DataFrame({
+        'Pattern' : [],
+        'Tag' : []
+    })
 
-# create training data
-X_train = []
-y_train = []
-for (pattern_sentence, tag) in xy:
-    # X: bag of words for each pattern_sentence
-    bag = bag_of_words(pattern_sentence, all_words)
-    X_train.append(bag)
-    # y: PyTorch CrossEntropyLoss needs only class labels, not one-hot
-    label = tags.index(tag)
-    y_train.append(label)
+    return df
 
-X_train = np.array(X_train)
-y_train = np.array(y_train)
+df = create_df()
+def extract_json_info(json_file, df):
 
-# Hyper-parameters 
-num_epochs = 1000
-batch_size = 8
-learning_rate = 0.001
-input_size = len(X_train[0])
-hidden_size = 8
-output_size = len(tags)
-print(input_size, output_size)
+    for intent in json_file['intents']:
 
-class ChatDataset(Dataset):
+        for pattern in intent['patterns']:
 
-    def __init__(self):
-        self.n_samples = len(X_train)
-        self.x_data = X_train
-        self.y_data = y_train
+            sentence_tag = [pattern, intent['tag']]
+            df.loc[len(df.index)] = sentence_tag
 
-    # support indexing such that dataset[i] can be used to get i-th sample
-    def __getitem__(self, index):
-        return self.x_data[index], self.y_data[index]
+    return df
 
-    # we can call len(dataset) to return the size
+df = extract_json_info(intents, df)
+df.head()
+#
+import nltk
+nltk.download('punkt')
+stemmer = PorterStemmer()
+ignore_words=['?', '!', ',', '.']
+
+def preprocess_pattern(pattern):
+    words = word_tokenize(pattern.lower())
+    stemmed_words = [stemmer.stem(word) for word in words if word not in ignore_words]
+    return " ".join(stemmed_words)
+
+df['Pattern'] = df['Pattern'].apply(preprocess_pattern)
+
+#Data Preprocessing
+labels = df['Tag'].unique().tolist()
+labels = [s.strip() for s in labels]
+num_labels = len(labels)
+id2label = {id:label for id, label in enumerate(labels)}
+label2id = {label:id for id, label in enumerate(labels)}
+df['labels'] = df['Tag'].map(lambda x: label2id[x.strip()])
+
+#Split the data into train and test
+X = list(df['Pattern'])
+y = list(df['labels'])
+X_train,X_test,y_train,y_test = train_test_split(X,y,random_state = 123)
+
+
+#Load BERT Pretrained model and Tokenizer
+model_name = "bert-base-uncased"
+max_len = 256
+
+tokenizer = BertTokenizer.from_pretrained(model_name,
+                                          max_length=max_len)
+
+model = BertForSequenceClassification.from_pretrained(model_name,
+                                                      num_labels=num_labels,
+                                                      id2label=id2label,
+                                                      label2id = label2id)
+
+
+
+#Transform the data into numerical format
+train_encoding = tokenizer(X_train, truncation=True, padding=True)
+test_encoding = tokenizer(X_test, truncation=True, padding=True)
+
+#Build Data Loader
+class DataLoader(Dataset):
+
+    def __init__(self, encodings, labels):
+
+        self.encodings = encodings
+        self.labels = labels
+
+    def __getitem__(self, idx):
+
+        item = {key: torch.tensor(val[idx]) for key, val in self.encodings.items()}
+        item['labels'] = torch.tensor(self.labels[idx])
+        return item
+
     def __len__(self):
-        return self.n_samples
 
-dataset = ChatDataset()
-train_loader = DataLoader(dataset=dataset,
-                          batch_size=batch_size,
-                          shuffle=True,
-                          num_workers=0)
+        return len(self.labels)
+    
+#Build Data Loader
+class DataLoader(Dataset):
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    def __init__(self, encodings, labels):
 
-model = NeuralNet(input_size, hidden_size, output_size).to(device)
+        self.encodings = encodings
+        self.labels = labels
 
-# Loss and optimizer
-criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    def __getitem__(self, idx):
 
-# Train the model
-for epoch in range(num_epochs):
-    for (words, labels) in train_loader:
-        words = words.to(device)
-        labels = labels.to(dtype=torch.long).to(device)
-        
-        # Forward pass
-        outputs = model(words)
-        # if y would be one-hot, we must apply
-        # labels = torch.max(labels, 1)[1]
-        loss = criterion(outputs, labels)
-        
-        # Backward and optimize
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        
-    if (epoch+1) % 100 == 0:
-        print (f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}')
+        item = {key: torch.tensor(val[idx]) for key, val in self.encodings.items()}
+        item['labels'] = torch.tensor(self.labels[idx])
+        return item
 
+    def __len__(self):
 
-print(f'final loss: {loss.item():.4f}')
+        return len(self.labels)
+train_dataloader = DataLoader(train_encoding, y_train)
+test_dataloader = DataLoader(test_encoding, y_test)
+fullDataLoader = DataLoader(full_data, y_test)
 
-data = {
-"model_state": model.state_dict(),
-"input_size": input_size,
-"hidden_size": hidden_size,
-"output_size": output_size,
-"all_words": all_words,
-"tags": tags
-}
+#Define Evaluation Metrcies
+def compute_metrics(pred):
 
-FILE = "data.pth"
-torch.save(data, FILE)
+    labels = pred.label_ids
+    preds = pred.predictions.argmax(-1)
+    precision, recall, f1, _ = precision_recall_fscore_support(labels, preds, average='macro')
+    acc = accuracy_score(labels, preds)
 
-print(f'training complete. file saved to {FILE}')
+    return {
+        'Accuracy': acc,
+        'F1': f1,
+        'Precision': precision,
+        'Recall': recall
+    }
+#Define Training Arguments
+import accelerate
+print(accelerate.__version__)
+training_args = TrainingArguments(
+    output_dir='./output',
+    do_train=True,
+    do_eval=True,
+    num_train_epochs=100,
+    per_device_train_batch_size=32,
+    per_device_eval_batch_size=16,
+    warmup_steps=100,
+    weight_decay=0.05,
+    logging_strategy='steps',
+    logging_dir='./multi-class-logs',
+    logging_steps=50,
+    evaluation_strategy="steps",
+    eval_steps=50,
+    save_strategy="steps",
+    load_best_model_at_end=True
+)
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=train_dataloader,
+    eval_dataset=test_dataloader,
+    compute_metrics= compute_metrics
+)
+trainer.train()
+#Evaluate the model
+q=[trainer.evaluate(eval_dataset=df2) for df2 in [train_dataloader, test_dataloader]]
+
+pd.DataFrame(q, index=["train","test"]).iloc[:,:5]
+def predict(text):
+
+    inputs = tokenizer(text, padding=True, truncation=True, max_length=512, return_tensors="pt").to("cuda")
+    outputs = model(**inputs)
+
+    probs = outputs[0].softmax(1)
+    pred_label_idx = probs.argmax()
+    pred_label = model.config.id2label[pred_label_idx.item()]
+
+    return probs, pred_label_idx, pred_label
+
+text = "Hello"
+predict(text)
+
+##Save the model
+model_path = "./model"
+trainer.save_model(model_path)
+tokenizer.save_pretrained(model_path)
