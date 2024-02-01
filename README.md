@@ -12,7 +12,7 @@ By default, the application uses a limited dataset. Users have the option to cho
 
 ## Prerequisites
 
-- Python 3.7 or higher
+- Python 3.10
 
 ## Installation and Training
 
