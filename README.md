@@ -4,7 +4,7 @@ Welcome to the Chatbot Deployment repository. This application uses a Bert Model
 
 ## Live Chatbot Interface
 
-You can interact with the chatbot by visiting the following link: [Chatbot Interface](https://bertbasechatbot.ngrok.io ). The chatbot's opening page is located in the bottom right corner of the page.
+You can interact with the chatbot by visiting the following link: [Chatbot Interface](http://chatbotalb272024-304292646.us-east-2.elb.amazonaws.com/). The chatbot's opening page is located in the bottom right corner of the page.
 
 ## Dataset and Model Customization
 
