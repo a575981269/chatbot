@@ -49,3 +49,4 @@ pip install --upgrade --force-reinstall accelerate
 
 If you experience any other issues or have questions, feel free to open an issue in this repository.
 
+![image](https://github.com/a575981269/chatbot/assets/42170721/c3001c5a-2138-4b0a-acbb-c835c5e1de28)
